@@ -1,5 +1,5 @@
 package main
 
 func main() {
-	calculateAverage(10, 500, 700_000)
+	calculateAverage(5, 500, 600_000)
 }

@@ -1,12 +1,12 @@
 package main
 
 import (
+	"fmt"
+	"math/rand"
+	"runtime"
 	"strings"
 	"sync"
-	"math/rand"
 	"time"
-	"fmt"
-	"runtime"
 )
 
 func mapFunc(line string) map[string]int {
@@ -30,24 +30,41 @@ func reduce(ch <-chan map[string]int) map[string]int {
 
 func reduceMutex(ch <-chan map[string]int) map[string]int {
 	final := make(map[string]int)
-	var wg sync.WaitGroup
 	var mu sync.Mutex
-	for partial := range ch {
+	var wg sync.WaitGroup
+
+	workerCount := 10
+
+	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
-		go func(part map[string]int) {
+		go func() {
 			defer wg.Done()
-			for word, count := range part {
-				mu.Lock()
-				final[word] += count
-				mu.Unlock()
+			for partial := range ch {
+				for word, count := range partial {
+					mu.Lock()
+					final[word] += count
+					mu.Unlock()
+				}
 			}
-		}(partial)
+		}()
 	}
+
 	wg.Wait()
 	return final
 }
 
-func concurrent(lines []string) map[string]int{
+func synchronous(lines []string) map[string]int {
+	result := make(map[string]int)
+	for _, line := range lines {
+		words := strings.Fields(line)
+		for _, word := range words {
+			result[word]++
+		}
+	}
+	return result
+}
+
+func concurrent(lines []string) map[string]int {
 	var wg sync.WaitGroup
 	mapChan := make(chan map[string]int)
 
@@ -67,59 +84,8 @@ func concurrent(lines []string) map[string]int{
 	return reduce(mapChan)
 }
 
-func concurrentBufferedChan(lines []string) map[string]int{
-	var wg sync.WaitGroup
-	mapChan := make(chan map[string]int, len(lines))
-
-	for _, line := range lines {
-		wg.Add(1)
-		go func(l string) {
-			defer wg.Done()
-			mapChan <- mapFunc(l)
-		}(line)
-	}
-
-	go func() {
-		wg.Wait()
-		close(mapChan)
-	}()
-
-	return reduce(mapChan)
-}
-
-func concurrentMutexReduce(lines []string) map[string]int{
-	var wg sync.WaitGroup
-	mapChan := make(chan map[string]int, len(lines))
-
-	for _, line := range lines {
-		wg.Add(1)
-		go func(l string) {
-			defer wg.Done()
-			mapChan <- mapFunc(l)
-		}(line)
-	}
-
-	go func() {
-		wg.Wait()
-		close(mapChan)
-	}()
-
-	return reduceMutex(mapChan)
-}
-
-func synchronous(lines []string) map[string]int {
-	result := make(map[string]int)
-	for _, line := range lines {
-		words := strings.Fields(line)
-		for _, word := range words {
-			result[word]++
-		}
-	}
-	return result
-}
-
-func concurrentWorkerPool(lines []string, workers, chunkSize int) map[string]int{
-	mapChan := make(chan map[string]int, 1024)
+func concurrentWorkerPoolMap(lines []string, workers, chunkSize int) map[string]int {
+	mapChan := make(chan map[string]int)
 	chunks := chunkLines(lines, chunkSize)
 	jobChan := make(chan []string, len(chunks))
 	var wg sync.WaitGroup
@@ -151,6 +117,44 @@ func concurrentWorkerPool(lines []string, workers, chunkSize int) map[string]int
 	}()
 
 	return reduce(mapChan)
+}
+
+func concurrentBufferedChanMutexReduce(lines []string) map[string]int {
+	mapChan := make(chan map[string]int, 10)
+	lineChan := make(chan string, len(lines))
+	var wg sync.WaitGroup
+	var wgLine sync.WaitGroup
+	worker := 10
+
+	wgLine.Add(1)
+	go func() {
+		wgLine.Done()
+		for _, line := range lines {
+			lineChan <- line
+		}
+	}()
+	
+	go func() {
+		wgLine.Wait()
+		close(lineChan)
+	}()
+
+	for i := 0; i < worker; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for line := range lineChan {
+				mapChan <- mapFunc(line)
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(mapChan)
+	}()
+
+	return reduceMutex(mapChan)
 }
 
 func generateLines(lineCount, wordsPerLine int) []string {
@@ -186,7 +190,7 @@ func chunkLines(lines []string, chunkSize int) [][]string {
 }
 
 func compareMap(a, b map[string]int) bool {
-	if len(a) != len(b){
+	if len(a) != len(b) {
 		return false
 	}
 	for k, v := range a {
@@ -200,7 +204,6 @@ func compareMap(a, b map[string]int) bool {
 func calculateAverage(n, lines, wordInLine int) {
 	var totalSynchronous time.Duration
 	var totalConcurrent time.Duration
-	var totalBuffered time.Duration
 	var totalWorker time.Duration
 	var totalMutex time.Duration
 
@@ -219,24 +222,18 @@ func calculateAverage(n, lines, wordInLine int) {
 		totalConcurrent += elapsed
 
 		start = time.Now()
-		result3 := concurrentBufferedChan(lines)
-		elapsed = time.Since(start)
-		totalBuffered += elapsed
-
-		start = time.Now()
-		result4 := concurrentWorkerPool(lines, runtime.NumCPU(), 25)
+		result3 := concurrentWorkerPoolMap(lines, runtime.NumCPU(), 20)
 		elapsed = time.Since(start)
 		totalWorker += elapsed
 
 		start = time.Now()
-		result5 := concurrentMutexReduce(lines)
+		result4 := concurrentBufferedChanMutexReduce(lines)
 		elapsed = time.Since(start)
 		totalMutex += elapsed
 
 		isEqual := compareMap(result1, result2) &&
 			compareMap(result1, result3) &&
-			compareMap(result1, result4) &&
-			compareMap(result1, result5)
+			compareMap(result1, result4)
 
 		if isEqual {
 			fmt.Println("All results are equal")
@@ -247,10 +244,9 @@ func calculateAverage(n, lines, wordInLine int) {
 		fmt.Println("---")
 	}
 
-	fmt.Printf("\n==== AVERAGE RESULTS AFTER %v RUNS ====\n", n)
-	fmt.Printf("Synchronous:                 %v\n", totalSynchronous/time.Duration(n))
-	fmt.Printf("Concurrent:                  %v\n", totalConcurrent/time.Duration(n))
-	fmt.Printf("Concurrent Buffered Channel: %v\n", totalBuffered/time.Duration(n))
-	fmt.Printf("Concurrent with Worker Pool: %v\n", totalWorker/time.Duration(n))
-	fmt.Printf("Concurrent Mutex Reduce:     %v\n", totalMutex/time.Duration(n))
+	fmt.Printf("\n==== AVERAGE RESULTS AFTER %v RUNS, %v LINES, %v WORDS IN LINE ====\n", n, lines, wordInLine)
+	fmt.Printf("Synchronous:                                           %v\n", totalSynchronous/time.Duration(n))
+	fmt.Printf("Concurrent:                                            %v\n", totalConcurrent/time.Duration(n))
+	fmt.Printf("Concurrent with Worker Pool Map:                       %v\n", totalWorker/time.Duration(n))
+	fmt.Printf("Concurrent with Worker Pool, Buffered Channel, Mutex:  %v\n", totalMutex/time.Duration(n))
 }
