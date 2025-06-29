@@ -37,6 +37,8 @@ This section provides benchmark data for various MapReduce use cases. All implem
 
 ### 🧪 Word Count
 
+The Word Count problem is a classic MapReduce use case where the goal is to count how many times each word appears in a large collection of text. It's a simple but powerful pattern to demonstrate data-parallel processing using mapping (tokenizing lines into words) and reducing (aggregating word frequencies).
+
 **Average of 5 runs**  
 **Dataset:** 500 lines × 600,000 words each
 
@@ -62,6 +64,8 @@ This section provides benchmark data for various MapReduce use cases. All implem
 ---
 
 ### 🧪 Log Analysis
+
+The Log Analysis problem involves parsing large volumes of server logs to extract insights like request counts per IP, HTTP method, endpoint, status code, and response size distribution. It simulates real-world observability and monitoring tasks, and serves as a great benchmark for comparing the performance of synchronous vs concurrent data processing pipelines.
 
 **Average of 5 runs**  
 **Dataset:** 25 files × 800,000 lines per file, 1000 IPs, 1000 Endpoints, 4 Methods, 4 Status Codes and size between 200 - 1600
