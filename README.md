@@ -61,5 +61,24 @@ This section provides benchmark data for various MapReduce use cases. All implem
 
 ---
 
+### 🧪 Log Analysis
+
+**Average of 5 runs**  
+**Dataset:** 25 files × 800,000 lines per file, 1000 IPs, 1000 Endpoints, 4 Methods, 4 Status Codes and size between 200 - 1600
+| Version                                                  | Average Time       |
+|-----------------------------------------------------------|--------------------|
+| 🟦 Synchronous                                             | 23.906264377s        |
+| 🟩 Concurrent                                              | 10.999082619s        |
+| 🟪 Concurrent with Buffered Channel + Mutex | 11.577384654s        |
+
+### 📝 Observations
+
+- ✅ **Concurrent** version provides an average **~2x speedup** over the synchronous baseline.
+- ⚙️ The **Concurrent with Buffered Channel and Mutex** version performs **slightly slower** than plain concurrent because:
+  - It spawns multiple goroutines per result to merge counts in parallel.
+  - It uses multiple `sync.Mutex` locks for different maps, which introduces overhead due to lock contention and goroutine scheduling.
+- 🧵 **Synchronous** is the **simplest** and most predictable, but **does not scale well** with larger data volumes or multi-core CPUs.
+
+
 📌 *Tip: Tune chunk sizes and buffer capacities based on available CPU cores and workload characteristics for optimal performance.*
 
